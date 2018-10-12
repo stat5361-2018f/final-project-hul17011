@@ -7,7 +7,7 @@ date: "`r format(Sys.time(), '%d %B %Y')`"
 
 # Introduction
 
-**The goal of this project** is to predict the *duration of taxi rides in NYC* based on features like trip coordinates or pickup date and time. The [data](https://www.kaggle.com/c/nyc-taxi-trip-duration/data) comes in the shape of 1.5 million training observations (`../input/train.csv`) and 630k test observation (`../input/test.csv`). Each row contains one taxi trip.
+**The goal of this project** is to predict the *duration of taxi rides in NYC* based on features like trip coordinates or pickup date and time. The [data](https://www.kaggle.com/c/nyc-taxi-trip-duration/data) comes in the shape of 1.5 million training observations and 630k test observation. Each row contains one taxi trip.
 
 Since there are lots of parameters when we are estimating the trip duration, we will first study and visualise the original data, engineer new features, and examine potential outliers. Then we add two external data sets, one is the NYC weather and the other is the fatest routes. We will visualise and analyse the new features within these data sets and their impact on the target trip duration values. Finally, we will choose some important parameters to curve fit the data using the least square method.
 
