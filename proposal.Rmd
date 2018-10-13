@@ -14,3 +14,31 @@ Since there are lots of parameters when we are estimating the trip duration, we 
 We use the *multiplot* function, courtesy of [R Cookbooks](http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/) to create multi-panel plots.
 We use *data.table's* fread function to speed up reading in the data.
 We can have an overview of the data sets using the *summary* and *glimpse* tools.
+
+We find:
+
+
+
+- *vendor\_id* only takes the values 1 or 2, presumably to differentiate two taxi companies
+
+
+
+- *pickup\_datetime* and (in the training set) *dropoff\_datetime* are combinations of date and time that we will have to re-format into a more useful shape
+
+
+
+- *passenger\_count* takes a median of 1 and a maximum of 9 in both data sets
+
+
+
+- The *pickup/dropoff\_longitute/latitute* describes the geographical coordinates where the meter was activate/deactivated.
+
+
+
+- *store\_and\_fwd\_flag* is a flag that indicates whether the trip data was sent immediately to the vendor ("N") or held in the memory of the taxi because there was no connection to the server ("Y"). Maybe there could be a correlation with certain geographical areas with bad reception?
+
+
+
+- *trip\_duration:* our target feature in the training data is measured in seconds.
+
+That means we need to deal with these unusual data.
