@@ -1,0 +1,280 @@
+---
+title: "Interim Report"
+author: "Hukai Luo"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=3.4,echo=TRUE, warning=FALSE, message=FALSE)
+```
+
+# 1 Introduction
+
+**The goal of this project** is to predict the *duration of taxi rides in NYC* based on features like trip coordinates or pickup date and time.
+
+Since there are lots of parameters when we are estimating the trip duration, we will first study and visualise the original data, engineer new features, and examine potential outliers. Finally, we will choose some important parameters to curve fit the data using the least square method.
+
+First of all, let's load the given data
+```{r load data}
+library('tibble')
+library('data.table')
+train <- as.tibble(fread("/Users/luohukai/Documents/GitHub/final-project-hul17011/train.csv"))
+test <- as.tibble(fread("/Users/luohukai/Documents/GitHub/final-project-hul17011/test.csv"))
+sample <- as.tibble(fread("/Users/luohukai/Documents/GitHub/final-project-hul17011/sample.csv"))
+```
+Then find the structure of the data
+```{r data structure,results='hide'}
+library('dplyr')
+summary(train)
+combine <- bind_rows(train %>% mutate(dset = "train"), 
+                     test %>% mutate(dset = "test",
+                                     dropoff_datetime = NA,
+                                     trip_duration = NA))
+combine <- combine %>% mutate(dset = factor(dset))
+```
+We find the data contains several factors: **vender_id** takes only 1 or 2 which represents two taxi companies; *pickup_datetime*; *dropoff_datetime*; *passenger_count*; *pickup_longitude*; *pickup_latitude*; *dropoff_longitude*; *dropoff_latitude*; *store_and_fwd_flag*; *trip_duration* which is measured in seconds.
+\newline In order to make the data easy to use, we will make some change to the data.
+```{r data reformate}
+library('lubridate')
+train <- train %>%
+  mutate(pickup_datetime = ymd_hms(pickup_datetime),
+         dropoff_datetime = ymd_hms(dropoff_datetime),
+         vendor_id = factor(vendor_id),
+         passenger_count = factor(passenger_count))
+```
+
+# 2 Plot by single parameter
+
+Now in order for us to get a better understanding of the data, we will begin by having a look at the distributions of the individual data features.
+First of all, let's plot the target feature trip_duration.
+```{r trip duration,fig.width=6, fig.height=3}
+library('ggplot2')
+p1 <- ggplot(train, aes(train$trip_duration)) +
+  geom_histogram(fill = "steelblue", bins = 150) +
+  scale_x_log10() +
+  scale_y_sqrt()
+p1
+```
+\newline Comments: Most trips will ends in nearly 1000 seconds, but there will also be some exceptions.
+\newline Then we can also plot the distribution of passenger_count,Vendor_id,day of the week, hour of the day
+```{r multiplot,echo=FALSE}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+```{r passengers venderid,echo=FALSE}
+library('corrplot')
+library('grid')
+library('scales')
+library('alluvial')
+p2 <- train %>%
+  group_by(passenger_count) %>%
+  count() %>%
+  ggplot(aes(passenger_count, n, fill = passenger_count)) +
+  geom_col() +labs(title="Passengers count")+
+  scale_y_sqrt()+theme(legend.position = "none")
+p3 <- train %>%
+  ggplot(aes(vendor_id, fill = vendor_id)) +labs(title="Vendor_id count")+
+  geom_bar() +theme(legend.position = "none")
+p4 <- train %>%
+  mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
+  group_by(wday, vendor_id) %>%
+  count() %>%
+  ggplot(aes(wday, n, colour = vendor_id)) +
+  geom_point(size = 4) + labs(title="Weekday")+
+  labs(x = "Day of the week", y = "Total number of pickups") +theme(legend.position = "none")
+p5 <- train %>%
+  mutate(hpick = hour(pickup_datetime)) %>%
+  group_by(hpick, vendor_id) %>%
+  count() %>%
+  ggplot(aes(hpick, n, color = vendor_id)) +
+  geom_point(size = 4) + labs(title="Hour")+
+  labs(x = "Hour of the day", y = "Total number of pickups") +theme(legend.position = "none")
+layout <- matrix(c(1,2,3,4),2,2,byrow=TRUE)
+multiplot(p2, p3, p4, p5, layout=layout)
+```
+\newline Comments: Most trips only have 1 passenger; Thursday,Friday and Satuaday are the most busy days; there is a strong dip during the early morning hours and another dip around 4pm.
+
+# 3 Relations
+
+While the previous section looked primarily at the distributions of the individual features, here we will examine in more detail how those features are related to each other and to our target trip_duration. In this project, we will assume that the trip_duration is only related to **Trip distance**, **passenger numbers**, **vender_id**, **day of the week**, **hour of the day**.
+
+## 3.1 Trip distance vs trip_duration
+
+First, we need to calculate the exact trip distance by the pickup and dropoff location.
+```{r distance}
+library('geosphere')
+pick_coord <- train %>%
+  select(pickup_longitude, pickup_latitude)
+drop_coord <- train %>%
+  select(dropoff_longitude, dropoff_latitude)
+train$dist <- distCosine(pick_coord, drop_coord)
+```
+Then plot the Trip distance vs trip_duration distribution.
+\newline
+```{r distance plot,echo=FALSE,fig.width=6, fig.height=2}
+train %>%
+  filter(trip_duration < 7600 & trip_duration > 120) %>%
+  filter(dist > 100 & dist < 100e3) %>%
+  ggplot(aes(dist, trip_duration)) +
+  geom_bin2d(bins = c(500,500)) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Direct distance/m", y = "Trip duration/s")
+```
+
+## 3.2 Pickup date/time vs trip_duration
+
+```{r pickup time,echo=FALSE,fig.width=6, fig.height=3}
+p6 <- train %>%
+  mutate(wday = wday(pickup_datetime, label = TRUE)) %>%
+  group_by(wday, vendor_id) %>%
+  summarise(median_duration = median(trip_duration)/60) %>%
+  ggplot(aes(wday, median_duration, color = vendor_id)) +
+  geom_point(size = 4) +labs(title="pickup date vs trip duration")+
+  labs(x = "Day of the week", y = "duration/min")
+p7 <- train %>%
+  mutate(hpick = hour(pickup_datetime)) %>%
+  group_by(hpick, vendor_id) %>%
+  summarise(median_duration = median(trip_duration)/60) %>%
+  ggplot(aes(hpick, median_duration, color = vendor_id)) +
+  geom_smooth(method = "loess", span = 1/2) +
+  geom_point(size = 3) +labs(title="pickup time vs trip duration")+
+  labs(x = "Hour of the day", y = "duration/min")
+layout <- matrix(c(1,2),2,1,byrow=FALSE)
+multiplot(p6, p7, layout=layout)
+```
+
+## 3.3 Passenger number vs trip_duration
+
+```{r passenger,echo=FALSE,fig.width=6, fig.height=2}
+p8 <- train %>%
+  
+  group_by(passenger_count, vendor_id) %>%
+  summarise(median_duration = median(trip_duration)) %>%
+
+  ggplot(aes(passenger_count, median_duration, color = passenger_count)) +
+  geom_point() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  facet_wrap(~ vendor_id) +
+  labs(y = "Trip duration [s]", x = "Number of passengers")
+p8
+```
+\newline From this plot, we can find the trip_duration doesn't have a strong relationship with the passenger numbers, the difference in the picture may only reveal the impact of different distance. For those passenger numbers = 7, 8, 9, we don't think that they are reasonable, so we just won't consider them.
+
+# 4 Prediction
+
+In this project, we assume the trip_duration distribution function has three parameters: trip_distance $d$, pickup date $w$, pickup time $t$.
+
+First of all, let's calculate the average driving speed V, let's delete some abnormal data.
+```{r ave_speed}
+train$speed <- train$dist/train$trip_duration*3.6
+train$wday <- wday(train$pickup_datetime, label = FALSE)
+train$hour <- hour(train$pickup_datetime)
+train <- train %>%
+  filter(trip_duration < 7600 & trip_duration > 40) %>% #delete abnormal trip_duration time: T>2hours and T<2mins
+  filter(dist > 100 & dist < 100e3) %>%                 #delete abnormal distance: d>100km and d<100m
+  filter(speed < 100 & speed > 1)                       #deleta speed which is too fast or too slow
+average_speed <- mean(train$speed)
+average_speed
+```
+
+Now, we get the average speed $\bar{V}=14.52126$
+we assume that the trip_duration distribution density has this format below:
+\[T= N[\frac{Distance}{\bar{V}},\sigma^2]*Date[wday]*Hour[hour]\]
+```{r function1}
+wdaydata <- train %>%                                     # get pickup date median duration
+  mutate(wday = wday(pickup_datetime, label = FALSE)) %>%
+  group_by(wday) %>%
+  summarise(median_duration = median(trip_duration))
+wdaydata
+hpickdata <- train  %>%                                   # get pickup hour median duration
+  mutate(hour = hour(pickup_datetime)) %>%
+  group_by(hour) %>%
+  summarise(median_duration = median(trip_duration))
+hpickdata
+```
+
+Then, define the DATE and HOUR function below, then use them to generate the duration function:
+
+```{r date_hour}
+DATE <- function(x){
+  wdaydata$median_duration[x]/mean(wdaydata$median_duration)
+}
+HOUR <- function(x){
+  hpickdata$median_duration[x+1]/mean(hpickdata$median_duration)
+}
+```
+
+So in this situation \[T= \frac{Distance}{\bar{V}}(1+r)*Date[wday]*Hour[hour]\]
+we only need to estimate r to get the estimate function.\[r=\frac{T\bar{V}}{Date[wday]*Hour[hour]*Distance}-1\]
+
+```{r durationfunction}
+n <- function(data){
+  (data$trip_duration/(DATE(data$wday)*HOUR(data$hour))-data$dist/average_speed*3.6)/(data$dist/average_speed*3.6)
+}
+error <- n(train)
+med <- median(n(train))
+sd <- sd(n(train))
+mean <- mean(n(train))
+p10 <- ggplot(data.frame(x=error),aes(x=x)) +         # histogram of error
+  geom_histogram(fill="darkblue", bins = 150,position="identity", alpha=0.5)+
+  xlim(-2,4)+xlab("error")
+p10
+```
+
+Now we get the r data, which reperents the error(pecentage) compared to $\frac{Distance}{\bar{V}}$
+```{r t function}
+T <- function(data,mean,sd){
+  res <- 0
+  for(i in 1:length(data$dist)){
+    res[i] <- data$dist[i]/average_speed*3.6*(1+rnorm(1,mean,sd))*(DATE(data$wday[i])*HOUR(data$hour[i]))
+  }
+  res
+}
+
+train$estimate <- T(train,mean,sd)    # assume r=N[mean,sd]
+p9 <- ggplot(train) +    
+  geom_histogram(aes(train$trip_duration),fill="steelblue",color="darkblue", bins = 150,position="identity", alpha=0.5) +
+  geom_histogram(aes(train$estimate),fill="pink", color="darkred", bins = 150,position="identity", alpha=0.5) +
+  scale_x_log10() +
+  scale_y_sqrt()
+p9
+```
