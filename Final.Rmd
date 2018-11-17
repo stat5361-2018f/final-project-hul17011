@@ -233,20 +233,14 @@ hpickdata
 ```
 
 Then, define the DATE and HOUR function below, then use them to generate the duration function:
-
 ```{r date_hour}
-DATE <- function(x){
-  wdaydata$median_duration[x]/mean(wdaydata$median_duration)
-}
-HOUR <- function(x){
-  hpickdata$median_duration[x+1]/mean(hpickdata$median_duration)
-}
+DATE <- function(x){wdaydata$median_duration[x]/mean(wdaydata$median_duration)}
+HOUR <- function(x){hpickdata$median_duration[x+1]/mean(hpickdata$median_duration)}
 ```
 
 So in this situation \[T= \frac{Distance}{\bar{V}}(1+r)*Date[wday]*Hour[hour]\]
 we only need to estimate r to get the estimate function.\[r=\frac{T\bar{V}}{Date[wday]*Hour[hour]*Distance}-1\]
-
-```{r durationfunction}
+```{r durationfunction,fig.width=6, fig.height=2.3}
 n <- function(data){
   (data$trip_duration/(DATE(data$wday)*HOUR(data$hour))-data$dist/average_speed*3.6)/(data$dist/average_speed*3.6)
 }
@@ -261,7 +255,7 @@ p10
 ```
 
 Now we get the r data, which reperents the error(pecentage) compared to $\frac{Distance}{\bar{V}}$
-```{r t function}
+```{r t function,fig.width=6, fig.height=3}
 T <- function(data,mean,sd){
   res <- 0
   for(i in 1:length(data$dist)){
