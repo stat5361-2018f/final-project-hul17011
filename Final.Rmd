@@ -1,5 +1,5 @@
 ---
-title: "Interim Report"
+title: "Final Report"
 author: "Hukai Luo"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 output:
@@ -278,3 +278,9 @@ p9 <- ggplot(train) +
   scale_y_sqrt()
 p9
 ```
+
+# 5 Comments and Improvement
+
+To be continued.
+
+
