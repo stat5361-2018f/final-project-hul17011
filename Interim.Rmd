@@ -199,13 +199,82 @@ p8
 ```
 \newline From this plot, we can find the trip_duration doesn't have a strong relationship with the passenger numbers, the difference in the picture may only reveal the impact of different distance. For those passenger numbers = 7, 8, 9, we don't think that they are reasonable, so we just won't consider them.
 
-# 4 Prediction/least square method
+# 4 Prediction
 
 In this project, we assume the trip_duration distribution function has three parameters: trip_distance $d$, pickup date $w$, pickup time $t$.
 
+First of all, let's calculate the average driving speed V, let's delete some abnormal data.
+```{r ave_speed}
+train$speed <- train$dist/train$trip_duration*3.6
+train$wday <- wday(train$pickup_datetime, label = FALSE)
+train$hour <- hour(train$pickup_datetime)
+train <- train %>%
+  filter(trip_duration < 7600 & trip_duration > 40) %>% #delete abnormal trip_duration time: T>2hours and T<2mins
+  filter(dist > 100 & dist < 100e3) %>%                 #delete abnormal distance: d>100km and d<100m
+  filter(speed < 100 & speed > 1)                       #deleta speed which is too fast or too slow
+average_speed <- mean(train$speed)
+average_speed
+```
 
+Now, we get the average speed $\bar{V}=14.52126$
+we assume that the trip_duration distribution density has this format below:
+\[T= N[\frac{Distance}{\bar{V}},\sigma^2]*Date[wday]*Hour[hour]\]
+```{r function1}
+wdaydata <- train %>%                                     # get pickup date median duration
+  mutate(wday = wday(pickup_datetime, label = FALSE)) %>%
+  group_by(wday) %>%
+  summarise(median_duration = median(trip_duration))
+wdaydata
+hpickdata <- train  %>%                                   # get pickup hour median duration
+  mutate(hour = hour(pickup_datetime)) %>%
+  group_by(hour) %>%
+  summarise(median_duration = median(trip_duration))
+hpickdata
+```
 
+Then, define the DATE and HOUR function below, then use them to generate the duration function:
 
+```{r date_hour}
+DATE <- function(x){
+  wdaydata$median_duration[x]/mean(wdaydata$median_duration)
+}
+HOUR <- function(x){
+  hpickdata$median_duration[x+1]/mean(hpickdata$median_duration)
+}
+```
 
+So in this situation \[T= \frac{Distance}{\bar{V}}(1+r)*Date[wday]*Hour[hour]\]
+we only need to estimate r to get the estimate function.\[r=\frac{T\bar{V}}{Date[wday]*Hour[hour]*Distance}-1\]
 
+```{r durationfunction}
+n <- function(data){
+  (data$trip_duration/(DATE(data$wday)*HOUR(data$hour))-data$dist/average_speed*3.6)/(data$dist/average_speed*3.6)
+}
+error <- n(train)
+med <- median(n(train))
+sd <- sd(n(train))
+mean <- mean(n(train))
+p10 <- ggplot(data.frame(x=error),aes(x=x)) +         # histogram of error
+  geom_histogram(fill="darkblue", bins = 150,position="identity", alpha=0.5)+
+  xlim(-2,4)+xlab("error")
+p10
+```
 
+Now we get the r data, which reperents the error(pecentage) compared to $\frac{Distance}{\bar{V}}$
+```{r t function}
+T <- function(data,mean,sd){
+  res <- 0
+  for(i in 1:length(data$dist)){
+    res[i] <- data$dist[i]/average_speed*3.6*(1+rnorm(1,mean,sd))*(DATE(data$wday[i])*HOUR(data$hour[i]))
+  }
+  res
+}
+
+train$estimate <- T(train,mean,sd)    # assume r=N[mean,sd]
+p9 <- ggplot(train) +    
+  geom_histogram(aes(train$trip_duration),fill="steelblue",color="darkblue", bins = 150,position="identity", alpha=0.5) +
+  geom_histogram(aes(train$estimate),fill="pink", color="darkred", bins = 150,position="identity", alpha=0.5) +
+  scale_x_log10() +
+  scale_y_sqrt()
+p9
+```
